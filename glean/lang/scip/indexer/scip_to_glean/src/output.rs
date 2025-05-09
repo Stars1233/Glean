@@ -61,6 +61,12 @@ struct Metadata {
     tool_info: Option<ToolInfo>,
     version: i32,
 }
+#[derive(Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct DisplayNameSymbol {
+    display_name: ScipId,
+    symbol: ScipId,
+}
 
 #[derive(Default)]
 pub struct GleanJSONOutput {
@@ -76,6 +82,8 @@ pub struct GleanJSONOutput {
     symbol_names: Vec<Key<SymbolName>>,
     symbol_kinds: Vec<Key<SymbolAndKind>>,
     metadata: Vec<Key<Metadata>>,
+    display_names: Vec<IdKey<Box<str>>>,
+    display_name_symbols: Vec<Key<DisplayNameSymbol>>,
 }
 impl GleanJSONOutput {
     pub fn src_file(&mut self, src_file_id: ScipId, path: Box<str>) {
@@ -171,13 +179,26 @@ impl GleanJSONOutput {
             },
         })
     }
-
+    pub fn display_name(&mut self, fact_id: ScipId, name: Box<str>) {
+        self.display_names.push(IdKey {
+            id: fact_id,
+            key: name,
+        })
+    }
+    pub fn display_name_symbol(&mut self, symbol_id: ScipId, name_id: ScipId) {
+        self.display_name_symbols.push(Key {
+            key: DisplayNameSymbol {
+                symbol: symbol_id,
+                display_name: name_id,
+            },
+        })
+    }
     pub fn write(self, mut w: impl std::io::Write) -> std::io::Result<()> {
         fn sub(
             mut w: impl std::io::Write,
             name: &str,
             mut items: Vec<impl Serialize>,
-            include_trailing_comma: bool,
+            is_first_line: &mut bool,
         ) -> std::io::Result<()> {
             if items.is_empty() {
                 return Ok(());
@@ -188,37 +209,53 @@ impl GleanJSONOutput {
 
             // Chunk items into groups of 10k to match behavior of Haskell code.
             for chunk in items.chunks(10000) {
+                // If this isn't the first line, include the trailing comma for the previous line
+                if !*is_first_line {
+                    w.write_all(b",\n")?;
+                }
+
                 w.write_all(br#"{"facts":"#)?;
                 serde_json::to_writer(&mut w, &chunk)?;
                 write!(w, r#","predicate":"{}.1"}}"#, name)?;
-                if include_trailing_comma {
-                    w.write_all(b",\n")?;
-                }
+                *is_first_line = false;
             }
 
             Ok(())
         }
 
+        // Track whether we're on the first line of the JSON output
+        // so we can add a trailing comma to the previous line
+        // This will be passed by mutable reference to sub()
+        let mut is_first_line = true;
+        let ifl = &mut is_first_line;
+
         w.write_all(b"[")?;
         // Match the ordering in scipDependencyOrder
-        sub(&mut w, "src.File", self.src_files, true)?;
-        sub(&mut w, "scip.Symbol", self.symbols, true)?;
-        sub(&mut w, "scip.LocalName", self.local_names, true)?;
-        sub(&mut w, "scip.Documentation", self.documentation, true)?;
-        sub(&mut w, "scip.FileLanguage", self.file_langs, true)?;
-        sub(&mut w, "scip.FileRange", self.file_ranges, true)?;
-        sub(&mut w, "scip.Definition", self.definitions, true)?;
-        sub(&mut w, "scip.Reference", self.references, true)?;
+        sub(&mut w, "src.File", self.src_files, ifl)?;
+        sub(&mut w, "scip.Symbol", self.symbols, ifl)?;
+        sub(&mut w, "scip.LocalName", self.local_names, ifl)?;
+        sub(&mut w, "scip.Documentation", self.documentation, ifl)?;
+        sub(&mut w, "scip.FileLanguage", self.file_langs, ifl)?;
+        sub(&mut w, "scip.FileRange", self.file_ranges, ifl)?;
+        sub(&mut w, "scip.Definition", self.definitions, ifl)?;
+        sub(&mut w, "scip.Reference", self.references, ifl)?;
         sub(
             &mut w,
             "scip.SymbolDocumentation",
             self.symbol_documentation,
-            true,
+            ifl,
         )?;
-        sub(&mut w, "scip.SymbolName", self.symbol_names, true)?;
-        sub(&mut w, "scip.SymbolKind", self.symbol_kinds, true)?;
-        sub(&mut w, "scip.Metadata", self.metadata, false)?;
-        w.write_all(b"]")?;
+        sub(&mut w, "scip.SymbolName", self.symbol_names, ifl)?;
+        sub(&mut w, "scip.SymbolKind", self.symbol_kinds, ifl)?;
+        sub(&mut w, "scip.Metadata", self.metadata, ifl)?;
+        sub(&mut w, "scip.DisplayName", self.display_names, ifl)?;
+        sub(
+            &mut w,
+            "scip.DisplayNameSymbol",
+            self.display_name_symbols,
+            ifl,
+        )?;
+        w.write_all(b"]\n")?;
 
         Ok(())
     }

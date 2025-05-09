@@ -24,7 +24,8 @@ import Glean.Schema.Gen.Utils
       newline,
       cap1,
       mkNamePolicy,
-      addNamespaceDependencies )
+      addNamespaceDependencies,
+      Oncall, buckOncallAnnotation )
 import Glean.Angle.Types
     ( PredicateRef,
       TypeRef,
@@ -118,11 +119,12 @@ utilMl = ocamlHeader <> Text.unlines
   , ""
   ]
 
-targetsHeader :: Text
-targetsHeader = Text.unlines
+targetsHeader :: Maybe Oncall -> Text
+targetsHeader oncall = Text.unlines
   [ "# \x40generated"
   , "# " <> generated
   , "load(\"@fbcode_macros//build_defs:ocaml_library.bzl\", \"ocaml_library\")"
+  , buckOncallAnnotation oncall
   , ""
   ]
 
@@ -256,8 +258,8 @@ genOCamlType ns namePolicy t = case t of
   SetTy ty -> do
     t <- genOCamlType ns namePolicy ty
     return $ t <> " list" -- Suboptimal but sets in OCaml is such a pain
-  PredicateTy pred -> return $ predToModule ns pred namePolicy <> ".t"
-  NamedTy tref -> return $ typeToModule ns tref namePolicy <> ".t"
+  PredicateTy _ pred -> return $ predToModule ns pred namePolicy <> ".t"
+  NamedTy _ tref -> return $ typeToModule ns tref namePolicy <> ".t"
   MaybeTy ty -> do
     t <- genOCamlType ns namePolicy ty
     return $ t <> " option"
@@ -276,7 +278,10 @@ genOCamlType ns namePolicy t = case t of
         Sum -> return $ "     | " <> fieldToConstructor field <> " of " <> ty
 
 genOCamlTypeFromField
-  :: FieldDef_ PredicateRef TypeRef -> NameSpaces -> NamePolicy -> ResolvedType
+  :: FieldDef_ s PredicateRef TypeRef
+  -> NameSpaces
+  -> NamePolicy
+  -> ResolvedType
   -> State GenAnonTypes GenType
 genOCamlTypeFromField field ns namePolicy t = do
   let typeName = fieldToTypeName field
@@ -357,10 +362,10 @@ genOCamlToJson var ns namePolicy t = case t of
     (_, code) <- genOCamlToJson "x" ns namePolicy ty
     return (var, "JSON_Array (List.map ~f:(fun x -> " <> code  <> ") "
        <> var <> ")")
-  PredicateTy pred ->
+  PredicateTy _ pred ->
     let moduleName = predToModule ns pred namePolicy in
         return (var, moduleName <> ".to_json " <> var)
-  NamedTy tref ->
+  NamedTy _ tref ->
     let moduleName = typeToModule ns tref namePolicy in
         return (var, moduleName <> ".to_json " <> var)
   MaybeTy ty -> do
@@ -381,7 +386,7 @@ genOCamlToJson var ns namePolicy t = case t of
   ElementsOf{} -> error "genOCamlToJson: ElementsOf"
 
 genOCamlToJsonFromField
-  :: FieldDef_ PredicateRef TypeRef -> GenVars -> NameSpaces -> NamePolicy
+  :: FieldDef_ s PredicateRef TypeRef -> GenVars -> NameSpaces -> NamePolicy
   -> ResolvedType -> State GenAnonTypesCode (GenVars, GenCode)
 genOCamlToJsonFromField field var ns namePolicy t = do
   let typeName = fieldToTypeName field
@@ -429,19 +434,19 @@ predToModule curNs ref namePolicy =
 -- e.g. angle: type t = { a : { ...} }
 --      ocaml: type a = ...
 -- TODO: handle naming conflict, use path of fields
-fieldToTypeName :: FieldDef_ PredicateRef TypeRef -> GenTypeName
+fieldToTypeName :: FieldDef_ s PredicateRef TypeRef -> GenTypeName
 fieldToTypeName = fieldDefName
 
 nameToConstructor :: Text -> Text
 nameToConstructor = cap1
 
-fieldToJSONKey :: FieldDef_ PredicateRef TypeRef -> Text
+fieldToJSONKey :: FieldDef_ s PredicateRef TypeRef -> Text
 fieldToJSONKey field = fieldDefName field
 
-fieldToConstructor :: FieldDef_ PredicateRef TypeRef -> Text
+fieldToConstructor :: FieldDef_ s PredicateRef TypeRef -> Text
 fieldToConstructor field = cap1 (fieldDefName field)
 
-fieldToVar :: FieldDef_ PredicateRef TypeRef -> Text
+fieldToVar :: FieldDef_ s PredicateRef TypeRef -> Text
 fieldToVar field =
   from_ (camelToUnderscore (fieldDefName field))
   where
@@ -516,9 +521,9 @@ genSchema namespaces preds types namePolicy =
         in
           (typeName, funName, kTy, var, code) : others
 
-genTargets :: [(NameSpaces, [NameSpaces])] -> Text
-genTargets deps =
-  targetsHeader
+genTargets :: [(NameSpaces, [NameSpaces])] -> Maybe Oncall -> Text
+genTargets deps oncall =
+  targetsHeader oncall
   <> targetsLib "common" ["util.ml", "fact_id.ml"] [jsonDep]
   <> Text.concat (genTarget <$> deps)
   where
@@ -538,10 +543,11 @@ genSchemaOCaml
   -> Version
   -> [ResolvedPredicateDef]
   -> [ResolvedTypeDef]
+  -> Maybe Oncall
   -> [(FilePath,Text)]
-genSchemaOCaml onlySchemas _version preddefs typedefs =
+genSchemaOCaml onlySchemas _version preddefs typedefs oncall =
   ( "dune", dune modules) :
-  ( "TARGETS", genTargets deps) :
+  ( "TARGETS", genTargets deps oncall) :
   ( "fact_id.ml", factIdMl) :
   ( "util.ml", utilMl) :
   [ (Text.unpack (nsToFileName namespaces),
