@@ -17,10 +17,12 @@ import Data.Default
 import Data.Maybe (mapMaybe)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
+import Data.List (groupBy)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Text as Text
+import Data.Text (Text)
 import Control.Exception
 import Options.Applicative
 import System.FilePath ( (</>))
@@ -63,12 +65,18 @@ data AngleSchema = AngleSchema {
  rSchema :: ResolvedSchemaRef,
  fpath :: FilePath,
  toByteSpan :: ToByteSpan,
- imports :: [ImportDecl]
+ imports :: [ImportDecl],
+ schemaSpan :: SrcSpan
 }
 
 type DeclBuilder a =
   forall m. (NewFact m) => a -> m (Anglelang.Declaration, SrcSpan)
 
+data Def = PredDef ResolvedPredicateDef | TyDef ResolvedTypeDef
+type ToDef = Ref -> Maybe Def
+data Ref = Pred PredicateRef | Ty TypeRef
+  deriving (Eq, Ord, Show)
+type XRef = (Ref, [SrcSpan])
 
 opts :: ParserInfo Command
 opts = info (helper <*> parser) fullDesc
@@ -102,14 +110,40 @@ opts = info (helper <*> parser) fullDesc
       optService <- options
       return Options{..}
 
+qualRefToSchemaName :: Text -> Text
+qualRefToSchemaName name = do
+  case reverse $ Text.splitOn "." name of
+    [] -> name -- we assume it's a schema name only (case for import refs)
+    (_:xs) -> Text.intercalate "." (reverse xs)
+
+lookupQualRef :: HashMap.HashMap Name ResolvedSchemaRef -> Ref -> Maybe Def
+lookupQualRef schemas ref = do
+  let schemaName = qualRefToSchemaName $ case ref of
+        Pred pref -> predicateRef_name pref
+        Ty tref -> typeRef_name tref
+  case HashMap.lookup schemaName schemas of
+    Just ResolvedSchema{..} -> do
+      case ref of
+          Pred pref -> case HashMap.lookup pref resolvedSchemaPredicates of
+            Just p -> Just $ PredDef p
+            Nothing ->
+              PredDef <$> HashMap.lookup pref resolvedSchemaReExportedPredicates
+          Ty tref -> case HashMap.lookup tref resolvedSchemaTypes of
+            Just t -> Just $ TyDef t
+            Nothing ->
+              TyDef <$> HashMap.lookup tref resolvedSchemaReExportedTypes
+    _ -> Nothing
+
 buildFacts :: ProcessedSchema -> [SourceFileInfo] -> FactBuilder
 buildFacts ProcessedSchema{..} fileinfos = do
   schemaFileInfo <- mapM buildFileLines fileinfos
   let schemaFileInfoMap = toFileInfoMap schemaFileInfo
       resolvedSchemaMap = toResolvedSchemaMap procSchemaResolved
+      toDef = lookupQualRef resolvedSchemaMap
 
   schemas <- mapM (\sSchema -> do
     let name = sourceRefName $ schemaName sSchema
+        srcSpan = schemaSrcSpan sSchema
         -- we don't have import statements in ResolvedSchema,
         -- so we get them from SourceSchema but use resolved version
         imports = mapMaybe (\d -> case d of
@@ -127,30 +161,156 @@ buildFacts ProcessedSchema{..} fileinfos = do
     (file, toBs) <- case HashMap.lookup name schemaFileInfoMap of
       Just SchemaFileInfo{..} -> return (filepath sourceFileInfo, toByteSpan)
       Nothing -> fail $ "Couldn't find file info for schema " <> show name
-    return $ AngleSchema rSchema file toBs imports
+    return $ AngleSchema rSchema file toBs imports srcSpan
     ) $ srcSchemas procSchemaSource
 
-  mapM_ buildSchemaFacts schemas
+  mapM_ (`buildSchemaFacts` toDef) schemas
 
-buildSchemaFacts :: AngleSchema -> FactBuilder
-buildSchemaFacts AngleSchema{..} = do
-  let preds = map snd $ HashMap.toList $ resolvedSchemaPredicates rSchema
-      types = map snd $ HashMap.toList $ resolvedSchemaTypes rSchema
-      derives = HashMap.elems $ resolvedSchemaDeriving rSchema
+buildSchemaFacts :: AngleSchema -> ToDef -> FactBuilder
+buildSchemaFacts AngleSchema{rSchema = rs@ResolvedSchema{..}, ..} toDef  = do
+  let preds = HashMap.elems resolvedSchemaPredicates
+      types = HashMap.elems resolvedSchemaTypes
+      derives = HashMap.elems resolvedSchemaDeriving
+      sourceRefs = findXRefs rs
+
   fileFact <- makeFact @Src.File $ Text.pack fpath
 
-  mapM_ (\d -> buildDecl buildImportDeclFacts d toByteSpan fileFact ) imports
-  mapM_ (\p -> buildDecl buildPredDeclFact p toByteSpan fileFact ) preds
-  mapM_ (\t -> buildDecl buildTypeDeclFact t toByteSpan fileFact ) types
-  mapM_ (\d -> buildDecl buildDeriveDeclFact d toByteSpan fileFact ) derives
-  -- TODO: Refs
+  -- build declarations
+  impDeclFacts <-
+    mapM (\d -> buildDecl buildImportDeclFacts d toByteSpan fileFact ) imports
+  predDeclFacts <-
+    mapM (\p -> buildDecl buildPredDeclFact p toByteSpan fileFact ) preds
+  typeDeclFacts <-
+    mapM (\t -> buildDecl buildTypeDeclFact t toByteSpan fileFact ) types
+  deriveDeclFacts <-
+    mapM (\d -> buildDecl buildDeriveDeclFact d toByteSpan fileFact ) derives
+  let allDecls =
+        impDeclFacts <> predDeclFacts <> typeDeclFacts <> deriveDeclFacts
+  _ <- buildDecl buildSchemaDeclFact
+    (resolvedSchemaName, resolvedSchemaVersion, schemaSpan, allDecls)
+      toByteSpan fileFact
+
+  -- build XRefs
+  xrefs <- mapM (\xref -> buildXRef xref toDef toByteSpan) sourceRefs
+  buildFileXRefsFact xrefs fileFact
+
+findTypeXRefs :: Type_ SrcSpan PredicateRef TypeRef -> [(Ref, SrcSpan)]
+findTypeXRefs = \case
+  ByteTy -> []
+  NatTy ->  []
+  BooleanTy -> []
+  StringTy -> []
+  ArrayTy type_ -> findTypeXRefs type_
+  SetTy type_ -> findTypeXRefs type_
+  MaybeTy type_ -> findTypeXRefs type_
+  RecordTy fields -> concatMap fieldRefs fields
+  SumTy fields -> concatMap fieldRefs fields
+  PredicateTy s pref -> [ (Pred pref, s) ]
+  NamedTy s tref -> [ (Ty tref, s) ]
+  EnumeratedTy _ -> [] -- todo: add enums refs
+  _ -> []
+  where
+    fieldRefs (FieldDef _ ty)  = findTypeXRefs ty
+
+buildXRef ::
+  forall m. (NewFact m) =>
+    XRef -> ToDef -> ToByteSpan -> m Anglelang.XRef
+buildXRef (ref, spans) toDef toBs = do
+  decl <- case toDef ref of
+    Just (PredDef d) -> fst <$> buildPredDeclFact d
+    Just (TyDef d) -> fst <$> buildTypeDeclFact d
+    _ -> fail $ "Couldn't find declaration for xref: " ++ show ref
+
+  let bytespans = map toBs spans
+      xreftarget = Anglelang.XRefTarget decl
+  return $ Anglelang.XRef xreftarget bytespans
+
+buildFileXRefsFact :: [Anglelang.XRef] -> Src.File ->  FactBuilder
+buildFileXRefsFact xRefs file =
+  makeFact_ @Anglelang.FileXRefs $ Anglelang.FileXRefs_key file xRefs
 
 
-buildDecl :: DeclBuilder a -> a -> ToByteSpan -> Src.File -> FactBuilder
+findPatXRefs :: ResolvedPat -> [(Ref, SrcSpan)]
+findPatXRefs = \case
+  Glean.Angle.Types.Nat _ _ -> []
+  String _ _ -> []
+  StringPrefix _ _ -> []
+  ByteArray _ _ -> []
+  Wildcard _ -> []
+  Variable _ _ -> []
+  FactId{} -> []
+  Never _ -> []
+  Enum _ _ -> []
+  Array _ pats -> concatMap findPatXRefs pats
+  ArrayPrefix _ pats -> concatMap findPatXRefs pats
+  Tuple _ pats -> concatMap findPatXRefs pats
+  Struct _ fields -> concatMap findFieldXRefs fields
+  App _ pat pats -> findPatXRefs pat ++ concatMap findPatXRefs pats
+  KeyValue _ pat pat' -> findPatXRefs pat ++ findPatXRefs pat'
+  Elements _ pat -> findPatXRefs pat
+  All _ pat -> findPatXRefs pat
+  ElementsOfArray _ pat -> findPatXRefs pat
+  OrPattern _ pat pat' -> findPatXRefs pat ++ findPatXRefs pat'
+  NestedQuery _ query -> findQueryXRefs query
+  Negation _ pat -> findPatXRefs pat
+  TypeSignature _ pat ty -> findPatXRefs pat ++ findTypeXRefs ty
+  IfPattern _ x y z -> findPatXRefs x ++ findPatXRefs y ++ findPatXRefs z
+  FieldSelect _ pat _ _ -> findPatXRefs pat
+  Deref _ pat -> findPatXRefs pat
+  Clause _ s pref pat _ -> (Pred pref,s) : findPatXRefs pat
+  Prim _ _ pats -> concatMap findPatXRefs pats
+  where
+    findFieldXRefs (Field _ pat) = findPatXRefs pat
+
+findQueryXRefs :: ResolvedQuery -> [(Ref, SrcSpan)]
+findQueryXRefs (SourceQuery head stms _) =
+  findHeadXRefs head ++ concatMap findStmXrefs stms
+  where
+    findHeadXRefs = maybe [] findPatXRefs
+    findStmXrefs (SourceStatement pat pat') =
+     findPatXRefs pat ++ findPatXRefs pat'
+
+findDeriveXRefs :: ResolvedDerivingDef -> [(Ref, SrcSpan)]
+findDeriveXRefs DerivingDef{..} = do
+  case derivingDefDeriveInfo of
+    NoDeriving -> []
+    Derive _ query -> findQueryXRefs query
+
+
+findXRefs :: ResolvedSchemaRef -> [XRef]
+findXRefs ResolvedSchema{..} = do
+  let preds = HashMap.elems resolvedSchemaPredicates
+      types = HashMap.elems resolvedSchemaTypes
+      derives = HashMap.elems resolvedSchemaDeriving
+      xrefs = concatMap (findTypeXRefs . predicateDefKeyType) preds ++
+        concatMap (findTypeXRefs . typeDefType) types ++
+        concatMap findDeriveXRefs derives
+      grouped = groupBy (\(k,_)(k',_) -> k == k') xrefs
+  map (\xrefs -> (fst $ head xrefs, map snd xrefs)) grouped
+
+
+buildDecl
+  :: forall a m. (NewFact m) => DeclBuilder a
+  -> a
+  -> ToByteSpan
+  -> Src.File
+  -> m Anglelang.DeclarationLocation
 buildDecl declBuilder def toByteSpan fileFact = do
   (decl, srcSpan) <- declBuilder def
-  makeFact_ @Anglelang.DeclarationLocation $
+  makeFact @Anglelang.DeclarationLocation $
     Anglelang.DeclarationLocation_key decl fileFact (toByteSpan srcSpan)
+
+buildSchemaDeclFact ::
+  DeclBuilder (Name, Version, SrcSpan, [Anglelang.DeclarationLocation])
+buildSchemaDeclFact (name, version, srcSpan, declLocs) = do
+  nameFact <- buildNameFact name version
+  schemaFact <- makeFact @Anglelang.SchemaDecl
+    $ Anglelang.SchemaDecl_key nameFact decls
+  return (Anglelang.Declaration_schema schemaFact, srcSpan)
+  where
+    decls = mapMaybe toDecl declLocs
+    toDecl = fmap Anglelang.declarationLocation_key_decl
+      . Anglelang.declarationLocation_key
 
 buildTypeDeclFact :: DeclBuilder ResolvedTypeDef
 buildTypeDeclFact TypeDef{typeDefRef = TypeRef{..}, ..} = do
@@ -225,7 +385,7 @@ buildFileLines fileInfo = do
 
 
 
-buildTypeFact :: forall m. (NewFact m) => Type_ PredicateRef TypeRef
+buildTypeFact :: forall m. (NewFact m) => Type_ SrcSpan PredicateRef TypeRef
   -> m Anglelang.Type
 buildTypeFact typeDef = do
   typeFact <- case typeDef of
@@ -239,9 +399,9 @@ buildTypeFact typeDef = do
         Anglelang.Type_key_record_ <$> mapM buildField fieldDefs
       SumTy fieldDefs ->
         Anglelang.Type_key_sum_ <$> mapM buildField fieldDefs
-      PredicateTy (PredicateRef n v) -> do
+      PredicateTy _ (PredicateRef n v) -> do
         Anglelang.Type_key_predicate_ <$> buildNameFact n v
-      NamedTy (TypeRef n v) -> do
+      NamedTy _ (TypeRef n v) -> do
         Anglelang.Type_key_named_ <$> buildNameFact n v
       MaybeTy tref -> do
         Anglelang.Type_key_maybe_ <$> buildTypeFact tref

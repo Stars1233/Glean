@@ -969,6 +969,7 @@ library indexers
         glean/lang/java-lsif
         glean/lang/lsif/indexer
         glean/lang/scip/indexer
+        glean/lang/swift
         glean/lang/python-scip
         glean/lang/dotnet-scip
         glean/lang/rust-lsif
@@ -987,6 +988,7 @@ library indexers
         Glean.Indexer.JavaLsif
         Glean.Indexer.LSIF
         Glean.Indexer.SCIP
+        Glean.Indexer.Swift
         Glean.Indexer.RustLsif
         Glean.Indexer.RustScip
         Glean.Indexer.Typescript
@@ -1498,7 +1500,7 @@ library regression-test-lib
         yaml
 
 library clang-derive-lib
-    import: fb-haskell, fb-cpp, deps, exe
+    import: fb-haskell, fb-cpp, deps
     hs-source-dirs: glean/lang/clang
     build-depends:
         ghc-compact,
@@ -1522,7 +1524,7 @@ library clang-derive-lib
         Derive.Types
 
 test-suite clang-test-regression
-    import: fb-haskell, fb-cpp, deps
+    import: fb-haskell, fb-cpp, deps, exe
     hs-source-dirs:
        glean/lang/clang/tests,
        glean/lang/clang/tests/github
@@ -1539,7 +1541,7 @@ test-suite clang-test-regression
         buildable: False
 
 test-suite clang-test-derivefamilies
-    import: fb-haskell, fb-cpp, deps
+    import: fb-haskell, fb-cpp, deps, exe
     hs-source-dirs:
        glean/lang/clang/tests,
        glean/lang/clang/tests/github
@@ -1561,7 +1563,7 @@ test-suite clang-test-derivefamilies
         buildable: False
 
 test-suite clang-test-deriveattributes
-    import: fb-haskell, fb-cpp, deps
+    import: fb-haskell, fb-cpp, deps, exe
     hs-source-dirs:
        glean/lang/clang/tests,
        glean/lang/clang/tests/github
@@ -1583,7 +1585,7 @@ test-suite clang-test-deriveattributes
         buildable: False
 
 test-suite clang-test-derivefuncalls
-    import: fb-haskell, fb-cpp, deps
+    import: fb-haskell, fb-cpp, deps, exe
     hs-source-dirs:
        glean/lang/clang/tests,
        glean/lang/clang/tests/github
@@ -1605,7 +1607,7 @@ test-suite clang-test-derivefuncalls
         buildable: False
 
 test-suite clang-test-deriveobjcinherit
-    import: fb-haskell, fb-cpp, deps
+    import: fb-haskell, fb-cpp, deps, exe
     hs-source-dirs:
        glean/lang/clang/tests,
        glean/lang/clang/tests/github
@@ -1627,7 +1629,7 @@ test-suite clang-test-deriveobjcinherit
         buildable: False
 
 test-suite clang-test-codemarkup
-    import: fb-haskell, fb-cpp, deps
+    import: fb-haskell, fb-cpp, deps, exe
     hs-source-dirs:
        glean/lang/clang/tests,
        glean/lang/clang/tests/github
@@ -1649,7 +1651,7 @@ test-suite clang-test-codemarkup
         buildable: False
 
 test-suite hack-derive-test
-    import: fb-haskell, fb-cpp, deps
+    import: fb-haskell, fb-cpp, deps, exe
     hs-source-dirs: glean/lang/hack/tests
     type: exitcode-stdio-1.0
     main-is: Main.hs
@@ -1705,10 +1707,16 @@ library bench-lib
 --     include-dirs: .
 --     cxx-sources:
 --         glean/schema/gen-cpp2/glean_test_types.cpp
+--         glean/schema/gen-cpp2/glean_test_types_compact.cpp
+--         glean/schema/gen-cpp2/glean_test_types_binary.cpp
 --         glean/schema/gen-cpp2/glean_test_data.cpp
 --         glean/schema/gen-cpp2/builtin_types.cpp
+--         glean/schema/gen-cpp2/builtin_types_compact.cpp
+--         glean/schema/gen-cpp2/builtin_types_binary.cpp
 --         glean/schema/gen-cpp2/builtin_data.cpp
 --         glean/schema/gen-cpp2/sys_types.cpp
+--         glean/schema/gen-cpp2/sys_types_compact.cpp
+--         glean/schema/gen-cpp2/sys_types_binary.cpp
 --         glean/schema/gen-cpp2/sys_data.cpp
 --         ... etc.
 
@@ -1826,7 +1834,7 @@ test-suite jsonwrite
         glean:schema,
 
 test-suite BinaryTest
-    import: fb-cpp
+    import: fb-cpp, exe
     type: exitcode-stdio-1.0
     main-is: glean/rts/tests/BinaryTest.cpp
     ghc-options: -no-hs-main
@@ -2110,7 +2118,7 @@ test-suite glass-range
 -- Glean snapshot regression tests, these require the indexers installed
 --
 test-suite glean-snapshot-flow
-    import: fb-haskell, deps
+    import: fb-haskell, deps, exe
     hs-source-dirs: glean/lang/codemarkup/tests/flow
     type: exitcode-stdio-1.0
     main-is: Glean/Regression/Flow/Main.hs
@@ -2122,7 +2130,7 @@ test-suite glean-snapshot-flow
         buildable: False
 
 test-suite glean-snapshot-hack
-    import: fb-haskell, deps
+    import: fb-haskell, deps, exe
     hs-source-dirs: glean/lang/codemarkup/tests/hack
     type: exitcode-stdio-1.0
     main-is: Glean/Regression/Hack/Main.hs
@@ -2147,7 +2155,7 @@ test-suite glean-snapshot-rust-lsif
         buildable: False
 
 test-suite glean-snapshot-rust-scip
-    import: fb-haskell, deps
+    import: fb-haskell, deps, exe
     hs-source-dirs: glean/lang/rust-scip/tests
     type: exitcode-stdio-1.0
     main-is: Glean/Regression/RustScip/Main.hs
@@ -2159,7 +2167,7 @@ test-suite glean-snapshot-rust-scip
         buildable: False
 
 test-suite glean-snapshot-python-scip
-    import: fb-haskell, deps
+    import: fb-haskell, deps, exe
     hs-source-dirs: glean/lang/python-scip/tests
     type: exitcode-stdio-1.0
     main-is: Glean/Regression/PythonScip/Main.hs
@@ -2171,7 +2179,7 @@ test-suite glean-snapshot-python-scip
         buildable: False
 
 test-suite glean-snapshot-dotnet-scip
-    import: fb-haskell, deps
+    import: fb-haskell, deps, exe
     hs-source-dirs: glean/lang/dotnet-scip/tests
     type: exitcode-stdio-1.0
     main-is: Glean/Regression/DotnetScip/Main.hs
@@ -2183,7 +2191,7 @@ test-suite glean-snapshot-dotnet-scip
         buildable: False
 
 test-suite glean-snapshot-typescript
-    import: fb-haskell, deps
+    import: fb-haskell, deps, exe
     hs-source-dirs: glean/lang/codemarkup/tests/typescript
     type: exitcode-stdio-1.0
     main-is: Glean/Regression/TypeScript/Main.hs
@@ -2195,7 +2203,7 @@ test-suite glean-snapshot-typescript
         buildable: False
 
 test-suite glean-snapshot-go
-    import: fb-haskell, deps
+    import: fb-haskell, deps, exe
     hs-source-dirs: glean/lang/codemarkup/tests/go/
     type: exitcode-stdio-1.0
     main-is: Glean/Regression/Go/Main.hs
@@ -2207,7 +2215,7 @@ test-suite glean-snapshot-go
         buildable: False
 
 test-suite glean-snapshot-java-lsif
-    import: fb-haskell, deps
+    import: fb-haskell, deps, exe
     hs-source-dirs: glean/lang/java-lsif/tests
     type: exitcode-stdio-1.0
     main-is: Glean/Regression/JavaLsif/Main.hs
@@ -2219,7 +2227,7 @@ test-suite glean-snapshot-java-lsif
         buildable: False
 
 test-suite glean-snapshot-lsif
-    import: fb-haskell, deps
+    import: fb-haskell, deps, exe
     hs-source-dirs: glean/lang/codemarkup/tests/lsif/
     type: exitcode-stdio-1.0
     main-is: Glean/Regression/Lsif/Main.hs
@@ -2264,14 +2272,14 @@ common glass-regression-deps
         glean:regression-test-lib,
 
 test-suite glass-regression-buck
-    import: glass-regression-deps, fb-haskell, deps
+    import: glass-regression-deps, fb-haskell, deps, exe
     type: exitcode-stdio-1.0
     main-is: Glean/Glass/Regression/Buck.hs
     ghc-options: -main-is Glean.Glass.Regression.Buck
     buildable: False
 
 test-suite glass-regression-cpp
-   import: glass-regression-deps, fb-haskell, deps
+   import: glass-regression-deps, fb-haskell, deps, exe
    type: exitcode-stdio-1.0
    hs-source-dirs:
      glean/glass/test/regression,
@@ -2298,7 +2306,7 @@ test-suite glass-regression-cpp
         buildable: False
 
 test-suite glass-regression-flow
-    import: glass-regression-deps, fb-haskell, deps
+    import: glass-regression-deps, fb-haskell, deps, exe
     type: exitcode-stdio-1.0
     main-is: Glean/Glass/Regression/Flow/Main.hs
     ghc-options: -main-is Glean.Glass.Regression.Flow.Main
@@ -2311,7 +2319,7 @@ test-suite glass-regression-flow
         buildable: False
 
 test-suite glass-regression-hack
-    import: glass-regression-deps, fb-haskell, deps
+    import: glass-regression-deps, fb-haskell, deps, exe
     type: exitcode-stdio-1.0
     main-is: Glean/Glass/Regression/Hack/Main.hs
     ghc-options: -main-is Glean.Glass.Regression.Hack.Main
@@ -2324,7 +2332,7 @@ test-suite glass-regression-hack
         buildable: False
 
 test-suite glass-regression-typescript
-    import: glass-regression-deps, fb-haskell, deps
+    import: glass-regression-deps, fb-haskell, deps, exe
     type: exitcode-stdio-1.0
     main-is: Glean/Glass/Regression/TypeScript/Main.hs
     ghc-options: -main-is Glean.Glass.Regression.TypeScript.Main
@@ -2336,7 +2344,7 @@ test-suite glass-regression-typescript
         buildable: False
 
 test-suite glass-regression-go
-    import: glass-regression-deps, fb-haskell, deps
+    import: glass-regression-deps, fb-haskell, deps, exe
     type: exitcode-stdio-1.0
     main-is: Glean/Glass/Regression/Go/Main.hs
     ghc-options: -main-is Glean.Glass.Regression.Go.Main
@@ -2348,7 +2356,7 @@ test-suite glass-regression-go
         buildable: False
 
 test-suite glass-regression-rust-lsif
-    import: glass-regression-deps, fb-haskell, deps
+    import: glass-regression-deps, fb-haskell, deps, exe
     type: exitcode-stdio-1.0
     main-is: Glean/Glass/Regression/RustLsif/Main.hs
     ghc-options: -main-is Glean.Glass.Regression.RustLsif.Main
@@ -2360,7 +2368,7 @@ test-suite glass-regression-rust-lsif
         buildable: False
 
 test-suite glass-regression-java-lsif
-    import: glass-regression-deps, fb-haskell, deps
+    import: glass-regression-deps, fb-haskell, deps, exe
     type: exitcode-stdio-1.0
     main-is: Glean/Glass/Regression/JavaLsif/Main.hs
     ghc-options: -main-is Glean.Glass.Regression.JavaLsif.Main
@@ -2372,14 +2380,14 @@ test-suite glass-regression-java-lsif
         buildable: False
 
 test-suite glass-regression-python
-    import: glass-regression-deps, fb-haskell, deps
+    import: glass-regression-deps, fb-haskell, deps, exe
     type: exitcode-stdio-1.0
     main-is: Glean/Glass/Regression/Python.hs
     ghc-options: -main-is Glean.Glass.Regression.Python
     buildable: False
 
 test-suite glass-regression-thrift
-    import: glass-regression-deps, fb-haskell, deps
+    import: glass-regression-deps, fb-haskell, deps, exe
     type: exitcode-stdio-1.0
     main-is: Glean/Glass/Regression/Thrift.hs
     ghc-options: -main-is Glean.Glass.Regression.Thrift

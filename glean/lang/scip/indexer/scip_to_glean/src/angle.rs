@@ -24,6 +24,17 @@ use crate::lsif::LanguageId;
 use crate::lsif::SymbolKind;
 use crate::output::GleanJSONOutput;
 
+// Key used to distinguish different fact hashmaps in Env.
+// Would probably be more efficient to just use an array of hashmaps,
+// but stick to the same design as the Haskell version for simplicity.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum StringPredicate {
+    Symbol,
+    LocalName,
+    File,
+    DisplayName,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct ScipId(u64);
@@ -35,7 +46,7 @@ impl fmt::Display for ScipId {
 
 pub struct Env {
     unique: u64,
-    fact_id: HashMap<Box<str>, ScipId>,
+    fact_id: HashMap<StringPredicate, HashMap<Box<str>, ScipId>>,
     out: GleanJSONOutput,
 }
 impl Env {
@@ -57,13 +68,24 @@ impl Env {
         id
     }
 
-    fn get_or_set_fact(&mut self, key: Box<str>) -> (ScipId, bool) {
-        match self.fact_id.get(&key) {
-            Some(id) => (*id, false),
+    fn set_def_fact(&mut self, kind: StringPredicate, key: Box<str>, val: ScipId) {
+        self.fact_id.entry(kind).or_default().insert(key, val);
+    }
+
+    fn get_def_fact_id(&mut self, kind: StringPredicate, key: &str) -> Option<ScipId> {
+        self.fact_id
+            .get(&kind)
+            .and_then(|map| map.get(key))
+            .copied()
+    }
+
+    fn get_or_set_fact(&mut self, kind: StringPredicate, key: Box<str>) -> (ScipId, bool) {
+        match self.get_def_fact_id(kind, &key) {
+            Some(id) => (id, true),
             None => {
                 let id = self.next_id();
-                self.fact_id.insert(key, id);
-                (id, true)
+                self.set_def_fact(kind, key, id);
+                (id, false)
             }
         }
     }
@@ -96,7 +118,7 @@ impl Env {
         }
         let filepath = filepath.into_boxed_str();
 
-        self.fact_id.insert(filepath.clone(), src_file_id);
+        self.set_def_fact(StringPredicate::File, filepath.clone(), src_file_id);
 
         self.out.src_file(src_file_id, filepath.clone());
         let lang_file_id = self.next_id();
@@ -145,7 +167,7 @@ impl Env {
         }
         .into_boxed_str();
 
-        let sym_id = self.fact_id.get(&qualified_symbol).copied();
+        let sym_id = self.get_def_fact_id(StringPredicate::Symbol, &qualified_symbol);
 
         for document in info.documentation {
             let doc_id = self.next_id();
@@ -155,8 +177,23 @@ impl Env {
                 self.out.symbol_documentation(sym_id, doc_id);
             }
         }
+        if let Some(sym_id) = sym_id {
+            if !info.display_name.is_empty() {
+                self.display_name_facts(info.display_name, sym_id);
+            }
+        }
 
         Ok(())
+    }
+
+    fn display_name_facts(&mut self, display_name: String, sym_id: ScipId) {
+        let display_name = display_name.into_boxed_str();
+        let (display_name_id, seen) =
+            self.get_or_set_fact(StringPredicate::DisplayName, display_name.clone());
+        if !seen {
+            self.out.display_name(display_name_id, display_name);
+        }
+        self.out.display_name_symbol(sym_id, display_name_id);
     }
 
     fn decode_scip_occurrence(
@@ -202,8 +239,9 @@ impl Env {
         filepath: &str,
     ) {
         let qualified_symbol = format!("{}/{}", filepath, local_symbol).into_boxed_str();
-        let (symbol_id, seen_symbol) = self.get_or_set_fact(qualified_symbol.clone());
-        if seen_symbol {
+        let (symbol_id, seen_symbol) =
+            self.get_or_set_fact(StringPredicate::Symbol, qualified_symbol.clone());
+        if !seen_symbol {
             self.out.symbol(symbol_id, qualified_symbol);
         }
         if sym_roles.has_def() {
@@ -213,11 +251,12 @@ impl Env {
         }
 
         let local_symbol = local_symbol.into_boxed_str();
-        let (name_id, seen_name) = self.get_or_set_fact(local_symbol.clone());
-        if seen_name {
+        let (name_id, seen_name) =
+            self.get_or_set_fact(StringPredicate::LocalName, local_symbol.clone());
+        if !seen_name {
             self.out.local_name(name_id, local_symbol.clone());
         }
-        if seen_symbol {
+        if !seen_symbol {
             self.out.symbol_name(symbol_id, name_id);
             // TODO: this could be any SymbolInformation.kind
             self.out.symbol_kind(symbol_id, SymbolKind::SkVariable);
@@ -232,8 +271,9 @@ impl Env {
         descriptor: Descriptor,
     ) {
         let scip_symbol = scip_symbol.into_boxed_str();
-        let (symbol_id, seen_symbol) = self.get_or_set_fact(scip_symbol.clone());
-        if seen_symbol {
+        let (symbol_id, seen_symbol) =
+            self.get_or_set_fact(StringPredicate::Symbol, scip_symbol.clone());
+        if !seen_symbol {
             self.out.symbol(symbol_id, scip_symbol);
         }
         if sym_roles.has_def() {
@@ -243,11 +283,12 @@ impl Env {
         }
 
         let local_name = descriptor.text.to_owned().into_boxed_str();
-        let (name_id, seen_name) = self.get_or_set_fact(local_name.clone());
-        if seen_name {
+        let (name_id, seen_name) =
+            self.get_or_set_fact(StringPredicate::LocalName, local_name.clone());
+        if !seen_name {
             self.out.local_name(name_id, local_name);
         }
-        if seen_symbol {
+        if !seen_symbol {
             self.out.symbol_name(symbol_id, name_id);
         }
 

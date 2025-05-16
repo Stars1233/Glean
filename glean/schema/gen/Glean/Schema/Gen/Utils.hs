@@ -48,6 +48,8 @@ module Glean.Schema.Gen.Utils
   , thriftName
   , haskellThriftName
   , addNamespaceDependencies
+  , buckOncallAnnotation
+  , Oncall
   ) where
 
 import Control.Monad.Reader
@@ -130,7 +132,7 @@ orderDecls decls = map betterNotBeAnyCyclesIn sccs
   outEdgesT (RecordTy fields)  = outEdgesFields fields
   outEdgesT (SumTy fields)  = outEdgesFields fields
   outEdgesT (SetTy ty) = outEdgesT ty
-  outEdgesT (NamedTy (TypeRef name ver)) = [(name,ver)]
+  outEdgesT (NamedTy _ (TypeRef name ver)) = [(name,ver)]
   outEdgesT PredicateTy{} = [] -- See Note [predicate type references]
   outEdgesT EnumeratedTy{} = []
   outEdgesT TyVar{} = error "outEdgesT: TyVar"
@@ -357,7 +359,7 @@ data NewOrOld = New | Old
 
 -- Make a name for a type. The returned name is assumed to be in the
 -- current namespace.
-nameThisType :: Monad m => ResolvedType -> ReaderT Env m (NewOrOld, Text)
+nameThisType :: Monad m => ResolvedType' s -> ReaderT Env m (NewOrOld, Text)
 nameThisType (RecordTy []) = return (Old, "builtin.Unit")
 nameThisType _ = do
   Env{..} <- ask
@@ -368,7 +370,7 @@ nameThisType _ = do
   return (New, name)
 
 repType :: Monad m => ResolvedType -> ReaderT Env m (Maybe ResolvedType)
-repType (NamedTy tr) = do
+repType (NamedTy _ tr) = do
   maybeTy <- typeDef tr
   case maybeTy of
     Nothing -> return Nothing
@@ -469,10 +471,16 @@ addNamespaceDependencies nss =
   outEdgesT (RecordTy fields)  = outEdgesFields fields
   outEdgesT (SumTy fields)  = outEdgesFields fields
   outEdgesT (SetTy ty) = outEdgesT ty
-  outEdgesT (NamedTy (TypeRef name _)) = [fst (splitDot name)]
-  outEdgesT (PredicateTy (PredicateRef name _)) = [fst (splitDot name)]
+  outEdgesT (NamedTy _ (TypeRef name _)) = [fst (splitDot name)]
+  outEdgesT (PredicateTy _ (PredicateRef name _)) = [fst (splitDot name)]
   outEdgesT EnumeratedTy{} = []
   outEdgesT TyVar{} = error "outEdgesT: TyVar"
   outEdgesT HasTy{} = error "outEdgesT: HasTy"
   outEdgesT HasKey{} = error "outEdgesT: HasKey"
   outEdgesT ElementsOf{} = error "outEdgesT: ELementsOf"
+
+type Oncall = Text
+buckOncallAnnotation :: Maybe Oncall -> Text
+buckOncallAnnotation name = case name of
+  Just oncall -> "\noncall(\"" <> oncall <> "\")"
+  Nothing -> ""
