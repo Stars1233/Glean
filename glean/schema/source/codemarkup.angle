@@ -164,7 +164,9 @@ predicate ResolveLocation:
     (codemarkup.csharp.CSharpResolveLocation { Location, E };
      { csharp = E } = Entity) |
     (codemarkup.graphql.GraphQLResolveLocation { Location, E };
-     { graphql = E } = Entity);
+     { graphql = E } = Entity) |
+    (codemarkup.anglelang.AngleResolveLocation { Location, E };
+     { angle = E } = Entity);
 
 predicate EntityLocation:
   {
@@ -267,7 +269,9 @@ predicate FileXRefsGenericEntities: {
   (codemarkup.dataswarm.DataswarmFileEntityXRefLocations { File, XRef, E };
   { plainEntity = { xref = XRef, entity = { dataswarm = E } } } = GenEntity) |
   (codemarkup.yaml.YamlFileEntityXLangXRefLocations { File, Source, E };
-  { xlangEntity = { source = Source, entity = E } } = GenEntity);
+  { xlangEntity = { source = Source, entity = E } } = GenEntity) |
+  (codemarkup.anglelang.AngleFileEntityXRefLocations { File, XRef, E };
+  { plainEntity = { xref = XRef, entity = { angle = E } } } = GenEntity)
 
 # Finding xrefs. All references in a file and their targets
 predicate FileEntityXRefLocations:
@@ -429,6 +433,10 @@ predicate EntityReferences:
     codemarkup.fbthrift.FbthriftEntityUses { E, File, Range };
     { fbthrift = E } = Entity;
     { range = Range } = RangeSpan;
+  ) | (
+    codemarkup.anglelang.AngleEntityUses { E, File, Span };
+    { span = Span } = RangeSpan;
+    { angle = E } = Entity;
   ) | (
     codemarkup.hack.HackIdlEntityUses { Entity, File, Span };
     { span = Span } = RangeSpan;

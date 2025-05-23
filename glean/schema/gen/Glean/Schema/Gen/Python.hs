@@ -30,9 +30,10 @@ genSchemaPy
   :: Version
   -> [ResolvedPredicateDef]
   -> [ResolvedTypeDef]
+  -> Maybe Oncall
   -> [(FilePath,Text)]
-genSchemaPy _version preddefs typedefs =
-  ( "py" </> "TARGETS", genTargets declsPerNamespace extraImports):
+genSchemaPy _version preddefs typedefs oncall =
+  ( "py" </> "TARGETS", genTargets declsPerNamespace extraImports oncall):
   ( "py" </> "glean_schema_predicate.py", -- base class shared between schemas
   Text.unlines
   [ "# \x40generated"
@@ -180,24 +181,24 @@ genNamedTypesAliases namePolicy types = map genTypeAlias $
     genTypeAlias (n, t, _) = pythonClassName n <> " = " <> baseTy Text.empty namePolicy t
 
 
-shouldGenClass :: Type_ pref tref -> Bool
+shouldGenClass :: Type_ st pref tref -> Bool
 shouldGenClass t = case t of
   RecordTy{} -> True
   SumTy{} -> True
   EnumeratedTy{} -> True
   _ -> False
 
-shouldGenAlias :: Type_ pref tref -> Bool
+shouldGenAlias :: Type_ st pref tref -> Bool
 shouldGenAlias t = not $ shouldGenClass t
 
 genType :: ResolvedTypeDef -> (TypeName, ResolvedType, Version)
 genType TypeDef{typeDefRef = TypeRef{..}, ..} =
   (typeRef_name, typeDefType, typeRef_version)
 
-unionDummyPreds :: Type_ PredicateRef tref
-  -> PredicateDef_ s PredicateRef tref
+unionDummyPreds :: Type_ st PredicateRef tref
+  -> PredicateDef_ s st PredicateRef tref
   -> Text
-  -> [PredicateDef_ s PredicateRef tref]
+  -> [PredicateDef_ s st PredicateRef tref]
 unionDummyPreds key pred class_name = map
   (\(n, t) -> PredicateDef (predRef n) t t
     (predicateDefDeriving pred) (predicateDefSrcSpan pred))
@@ -271,15 +272,15 @@ namespaceToFileName n = Text.intercalate "_" n
 genTargets
   :: HashMap NameSpaces ([NameSpaces], [ResolvedPredicateDef], [ResolvedTypeDef])
   -> [(Text, [Text])]
+  -> Maybe Oncall
   -> Text
-genTargets info extraImports =
+genTargets info extraImports oncall =
   Text.unlines $
      [ "# \x40generated"
      , "# to regenerate: ./glean/schema/sync"
      , "load(\"@fbcode_macros//build_defs:python_library.bzl\", " <>
        "\"python_library\")"
-     , ""
-     , "oncall(\"code_indexing\")"
+     , buckOncallAnnotation oncall
      , ""
      ] ++
      [ "python_library("
@@ -360,8 +361,8 @@ baseTy typeName namePolicy t = Text.pack $ case t of
   BooleanTy{} -> "bool"
   StringTy{} -> "str"
   ByteTy{} -> "bytes"
-  PredicateTy pred -> nameLookup pred predNames namePolicy "predicate"
-  NamedTy typeRef -> nameLookup typeRef typeNames namePolicy "named"
+  PredicateTy _ pred -> nameLookup pred predNames namePolicy "predicate"
+  NamedTy _ typeRef -> nameLookup typeRef typeNames namePolicy "named"
   ArrayTy field -> Text.unpack $ if type_ == "bytes"
     then type_
     else "List[" <> type_ <> "]"
@@ -421,15 +422,15 @@ predicateImports namespaces namePolicy preds = filter
       _ -> [extractImport namePolicy t]
       where
         extractImport namePolicy t = Text.pack $ case t of
-          PredicateTy pred -> nameLookup pred predNames namePolicy "predicate"
-          NamedTy typeRef -> nameLookup typeRef typeNames namePolicy "named"
+          PredicateTy _ pred -> nameLookup pred predNames namePolicy "predicate"
+          NamedTy _ typeRef -> nameLookup typeRef typeNames namePolicy "named"
           _ -> ""
         nameLookup type_ names namePolicy errMessage =
           case HashMap.lookup type_ (names namePolicy) of
             Just (ns, _) -> Text.unpack $ namespaceToFileName ns
             _ -> error $ errMessage ++ "PythonName: " ++ show type_
 
-fieldName :: FieldDef_ PredicateRef tref -> Text
+fieldName :: FieldDef_ s PredicateRef tref -> Text
 fieldName = from_ . fieldDefName
 
 intercalateQueryFields :: [Text] -> Text

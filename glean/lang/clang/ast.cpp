@@ -6,6 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <utility>
 #include <variant>
 
 #include <clang/AST/DeclBase.h>
@@ -77,7 +78,15 @@ std::optional<std::string> getMangledNameHash(const clang::FunctionDecl* decl) {
   std::string Buffer;
   Buffer.reserve(128);
   llvm::raw_string_ostream Out(Buffer);
-  Ctx->mangleName(clang::GlobalDecl{decl}, Out);
+  clang::GlobalDecl GD;
+  if (const auto* CD = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
+    GD = clang::GlobalDecl(CD, clang::Ctor_Base);
+  } else if (const auto* DD = llvm::dyn_cast<clang::CXXDestructorDecl>(decl)) {
+    GD = clang::GlobalDecl(DD, clang::Dtor_Base);
+  } else {
+    GD = clang::GlobalDecl(decl);
+  }
+  Ctx->mangleName(GD, Out);
   const auto& mangledName = Out.str();
 
   auto hash = llvm::SHA1::hash(llvm::arrayRefFromStringRef(mangledName));
@@ -415,7 +424,7 @@ class DeclarationTargets {
   }
 
   void contextXRef(Cxx::Declaration target, ClangDB::SourceRange sort_id) {
-    refsInContext.insert({target, sort_id});
+    refsInContext.insert({std::move(target), sort_id});
   }
 
  private:
@@ -1207,7 +1216,7 @@ struct ASTVisitor : public clang::RecursiveASTVisitor<ASTVisitor> {
     static folly::Optional<NamespaceDecl> declare(
         ASTVisitor& visitor,
         const clang::NamespaceDecl* decl,
-        Cxx::Scope,
+        const Cxx::Scope&,
         Src::Range range) {
       folly::Optional<Fact<Cxx::Name>> name;
       if (!decl->isAnonymousNamespace()) {
@@ -1309,7 +1318,7 @@ struct ASTVisitor : public clang::RecursiveASTVisitor<ASTVisitor> {
     static folly::Optional<EnumDecl> declare(
         ASTVisitor& visitor,
         const clang::EnumDecl* decl,
-        Cxx::Scope scope,
+        const Cxx::Scope& scope,
         Src::Range range) {
       auto qname =
           visitor.db.fact<Cxx::QName>(visitor.db.name(decl->getName()), scope);
@@ -1382,7 +1391,7 @@ struct ASTVisitor : public clang::RecursiveASTVisitor<ASTVisitor> {
     static folly::Optional<TypeAliasDecl> declare(
         ASTVisitor& visitor,
         const clang::TypedefNameDecl* decl,
-        Cxx::Scope scope,
+        const Cxx::Scope& scope,
         Src::Range range) {
       folly::Optional<Cxx::TypeAliasKind> kind;
       if (clang::isa<clang::TypeAliasDecl>(decl)) {
@@ -1445,7 +1454,7 @@ struct ASTVisitor : public clang::RecursiveASTVisitor<ASTVisitor> {
     static folly::Optional<NamespaceAliasDecl> declare(
         ASTVisitor& visitor,
         const clang::NamespaceAliasDecl* decl,
-        Cxx::Scope,
+        const Cxx::Scope&,
         Src::Range range) {
       auto qname = visitor.db.fact<Cxx::NamespaceQName>(
           just(visitor.db.name(decl->getName())),
@@ -1497,7 +1506,7 @@ struct ASTVisitor : public clang::RecursiveASTVisitor<ASTVisitor> {
     static folly::Optional<ClassDecl> declare(
         ASTVisitor& visitor,
         const clang::CXXRecordDecl* decl,
-        Cxx::Scope scope,
+        const Cxx::Scope& scope,
         Src::Range range) {
       if (decl->isInjectedClassName()) {
         return folly::none;
@@ -1912,9 +1921,13 @@ struct ASTVisitor : public clang::RecursiveASTVisitor<ASTVisitor> {
         // Here, i is a bit field but it doesn't have a fixed bit size. In fact,
         // Clang segfaults if we call getBitWidthValue on it. So let's give it
         // size 0 for now - we should probably extend the schema eventually.
-        bitsize = size_expr->isValueDependent()
-            ? 0
-            : decl->getBitWidthValue(visitor.astContext);
+        bitsize = size_expr->isValueDependent() ? 0
+#if LLVM_VERSION_MAJOR >= 20
+                                                : decl->getBitWidthValue();
+#else
+                                                : decl->getBitWidthValue(
+                                                      visitor.astContext);
+#endif
       }
       if (auto ivar = clang::dyn_cast<clang::ObjCIvarDecl>(decl)) {
         return Cxx::VariableKind::ivar(
@@ -1928,7 +1941,7 @@ struct ASTVisitor : public clang::RecursiveASTVisitor<ASTVisitor> {
     static folly::Optional<VarDecl> declare(
         ASTVisitor& visitor,
         const clang::FieldDecl* decl,
-        Cxx::Scope scope,
+        const Cxx::Scope& scope,
         Src::Range range) {
       auto qname =
           visitor.db.fact<Cxx::QName>(visitor.db.name(decl->getName()), scope);
@@ -2359,7 +2372,7 @@ struct ASTVisitor : public clang::RecursiveASTVisitor<ASTVisitor> {
     static folly::Optional<ObjcMethodDecl> declare(
         ASTVisitor& visitor,
         const clang::ObjCMethodDecl* d,
-        Cxx::Scope,
+        const Cxx::Scope&,
         Src::Range range) {
       if (auto container =
               ObjcContainerDecl::find(visitor, d->getDeclContext())) {
@@ -2406,7 +2419,7 @@ struct ASTVisitor : public clang::RecursiveASTVisitor<ASTVisitor> {
     static folly::Optional<ObjcPropertyDecl> declare(
         ASTVisitor& visitor,
         const clang::ObjCPropertyDecl* d,
-        Cxx::Scope,
+        const Cxx::Scope&,
         Src::Range range) {
       if (auto container =
               ObjcContainerDecl::find(visitor, d->getDeclContext())) {

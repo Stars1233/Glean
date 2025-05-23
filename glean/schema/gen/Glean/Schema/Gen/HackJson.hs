@@ -25,6 +25,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Lazy as Text.Lazy
 import qualified Data.Text.Lazy.Builder as TextBuilder
 import GHC.Generics
+import Glean.Schema.Gen.Utils (Oncall)
 
 import Util.Text (textShow)
 
@@ -104,8 +105,9 @@ genSchemaHackJson
   :: Version
   -> [ResolvedPredicateDef]
   -> [ResolvedTypeDef]
+  -> Maybe Oncall
   -> [(FilePath,Text)]
-genSchemaHackJson _version preddefs typedefs = HashMap.toList files
+genSchemaHackJson _version preddefs typedefs _ = HashMap.toList files
   where
     predMap = HashMap.fromList $ map (\p -> (predicateDefRef p, p)) preddefs
     typeMap = HashMap.fromList $ map (\t -> (typeDefRef t, t)) typedefs
@@ -241,7 +243,7 @@ instance Aeson.ToJSON AngleTypeRepr where
 angleTypeReprFor
   :: ResolvedType
   -> ReaderT AngleTypeReprContext (Writer [HackEnum]) AngleTypeRepr
-angleTypeReprFor (PredicateTy ref) = do
+angleTypeReprFor (PredicateTy _ ref) = do
   ctx <- ask
   case lookupPredDefKeyValue ctx ref of
     -- If the predicate has value of type {} and the key is a String
@@ -249,7 +251,7 @@ angleTypeReprFor (PredicateTy ref) = do
     -- concise
     Just (StringTy, RecordTy []) ->
       PredicateT ref (classname ctx) <$> angleTypeInnerReprFor StringTy
-    _ -> angleTypeInnerReprFor (PredicateTy ref)
+    _ -> angleTypeInnerReprFor (PredicateTy () ref)
     where
       lookupPredDefKeyValue ctx pref = do
         PredicateDef{..} <- HashMap.lookup pref $ ctxPredMap ctx
@@ -259,7 +261,7 @@ angleTypeReprFor (PredicateTy ref) = do
 angleTypeReprFor ty = angleTypeInnerReprFor ty
 
 angleTypeInnerReprFor
-  :: ResolvedType
+  :: ResolvedType' s
   -> ReaderT AngleTypeReprContext (Writer [HackEnum]) AngleTypeRepr
 angleTypeInnerReprFor ByteTy = return ByteTInt
 angleTypeInnerReprFor NatTy = return NatTInt
@@ -276,7 +278,7 @@ angleTypeInnerReprFor (SumTy fields) =
     f FieldDef{..} =
       (,) fieldDefName <$> angleTypeInnerReprFor fieldDefType
 angleTypeInnerReprFor (SetTy ty) = SetTVec <$> angleTypeInnerReprFor ty
-angleTypeInnerReprFor (PredicateTy ref) = do
+angleTypeInnerReprFor (PredicateTy _ ref) = do
   ctx <- ask
   case lookupPredDefKeyValue ctx ref of
     Nothing -> return $
@@ -291,7 +293,7 @@ angleTypeInnerReprFor (PredicateTy ref) = do
         return (predicateDefKeyType, predicateDefValueType)
       classname AngleTypeReprContext{..} =
         refClassname $ prefVref ctxPredLatest ref
-angleTypeInnerReprFor (NamedTy ref) = do
+angleTypeInnerReprFor (NamedTy _ ref) = do
   ctx <- ask
   case lookupTypeDefType ctx ref of
     Just (EnumeratedTy alts) ->
@@ -425,8 +427,8 @@ cyclesInDefs ctx defs = concatMap hasCycles sccs
   outEdgesT (RecordTy fields)  = outEdgesFields fields
   outEdgesT (SumTy fields)  = outEdgesFields fields
   outEdgesT (SetTy ty) = outEdgesT ty
-  outEdgesT (NamedTy (TypeRef name ver)) = [(name,ver)]
-  outEdgesT (PredicateTy (PredicateRef name ver)) = [(name,ver)]
+  outEdgesT (NamedTy _ (TypeRef name ver)) = [(name,ver)]
+  outEdgesT (PredicateTy _ (PredicateRef name ver)) = [(name,ver)]
   outEdgesT EnumeratedTy{} = []
   outEdgesT TyVar{} = error "outEdgesT: TyVar"
   outEdgesT HasTy{} = error "outEdgesT: HasTy"

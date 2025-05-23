@@ -898,6 +898,16 @@ angleNegationTest modify = dbTestCase $ \env repo -> do
   print r
   assertEqual "negation - scope 6" 1 (length r)
 
+  -- Test that we can automatically quantify an unbound variable
+  -- used in a negation.
+  r <- runQuery_ env repo $ modify $ angle @Glean.Test.Node
+    -- nodes that are not parents
+    [s|
+        N where !(glean.test.Edge { parent = N });
+    |]
+  print r
+  assertEqual "negation - scope 7" 4 (length r)
+
   -- a negated query's head is replaced with {}
   r <- runQuery_ env repo $ modify $ angleData @Nat
     [s|
@@ -906,7 +916,6 @@ angleNegationTest modify = dbTestCase $ \env repo -> do
     |]
   print r
   assertEqual "negation -  3" 1 (length r)
-
 
 -- type checking
 angleTypeTest :: Test
@@ -1020,3 +1029,10 @@ angleTypeTest = dbTestCase $ \env repo -> do
     |]
   print r
   assertEqual "angle - inference 8" 1 (length r)
+
+  r <- runQuery_ env repo $ angleData @Text
+    [s|
+      P.string_ where P : glean.test.Predicate; P.enum_ = e
+    |]
+  print r
+  assertEqual "angle - inference 9" 4 (length r)
