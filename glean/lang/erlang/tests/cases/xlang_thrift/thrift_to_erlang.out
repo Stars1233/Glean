@@ -44,6 +44,35 @@
                     "key": "fbcode/glean/lang/erlang/tests/cases/xlang_thrift/example.thrift"
                   }
                 },
+                "name": { "key": "ConfigError" }
+              }
+            }
+          }
+        }
+      },
+      "from": {
+        "record_": {
+          "key": {
+            "name": "config_error",
+            "module": "xlang_thrift_types.hrl",
+            "app": "xlang_thrift"
+          }
+        }
+      }
+    }
+  },
+  {
+    "key": {
+      "to": {
+        "exception_": {
+          "key": {
+            "name": {
+              "key": {
+                "file": {
+                  "key": {
+                    "key": "fbcode/glean/lang/erlang/tests/cases/xlang_thrift/example.thrift"
+                  }
+                },
                 "name": { "key": "NotFound" }
               }
             }
@@ -251,6 +280,38 @@
             "name": "point",
             "arity": 0,
             "module": "thrift_xlang_types",
+            "app": "xlang_thrift"
+          }
+        }
+      }
+    }
+  },
+  {
+    "key": {
+      "to": {
+        "named": {
+          "key": {
+            "name": {
+              "name": {
+                "key": {
+                  "file": {
+                    "key": {
+                      "key": "fbcode/glean/lang/erlang/tests/cases/xlang_thrift/example.thrift"
+                    }
+                  },
+                  "name": { "key": "ServerConfig" }
+                }
+              },
+              "kind": 2
+            }
+          }
+        }
+      },
+      "from": {
+        "record_": {
+          "key": {
+            "name": "server_config",
+            "module": "xlang_thrift_types.hrl",
             "app": "xlang_thrift"
           }
         }
